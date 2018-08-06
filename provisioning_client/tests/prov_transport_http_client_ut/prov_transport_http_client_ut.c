@@ -64,6 +64,7 @@ MOCKABLE_FUNCTION(, JSON_Value*, json_parse_file, const char*, string);
 MOCKABLE_FUNCTION(, JSON_Object*, json_value_get_object, const JSON_Value *, value);
 MOCKABLE_FUNCTION(, JSON_Value*, json_object_get_value, const JSON_Object *, object, const char *, name);
 MOCKABLE_FUNCTION(, const char*, json_object_get_string, const JSON_Object*, object, const char *, name);
+MOCKABLE_FUNCTION(, double, json_object_get_number, const JSON_Object*, object, const char *, name);
 MOCKABLE_FUNCTION(, const char*, json_value_get_string, const JSON_Value*, value);
 MOCKABLE_FUNCTION(, JSON_Object*, json_object_get_object, const JSON_Object*, object, const char*, name);
 MOCKABLE_FUNCTION(, void, json_value_free, JSON_Value*, value);

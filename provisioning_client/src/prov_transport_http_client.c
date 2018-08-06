@@ -24,6 +24,8 @@
 #define HTTP_STATUS_CODE_OK_MAX             226
 #define HTTP_STATUS_CODE_UNAUTHORIZED       401
 
+#define DPS_ERROR_CODE_THROTTLED			429001
+
 static const char* PROV_REGISTRATION_URI_FMT = "/%s/registrations/%s/register?api-version=%s";
 static const char* PROV_OP_STATUS_URI_FMT = "/%s/registrations/%s/operations/%s?api-version=%s";
 
@@ -54,6 +56,7 @@ typedef enum PROV_TRANSPORT_STATE_TAG
     TRANSPORT_CLIENT_STATE_STATUS_RECV,
 
     TRANSPORT_CLIENT_STATE_TRANSIENT,
+    TRANSPORT_CLIENT_STATE_THROTTLED,
 
     TRANSPORT_CLIENT_STATE_ERROR
 } PROV_TRANSPORT_STATE;
@@ -121,6 +124,38 @@ static void on_http_error(void* callback_ctx, HTTP_CALLBACK_REASON error_result)
     }
 }
 
+static int parseErrorCode(const unsigned char* content, size_t content_len)
+{
+    (void)content_len;
+
+	int result;
+	JSON_Value* json_value = json_parse_string((const char*)content);
+	
+	if (json_value == NULL)
+	{
+		LogError("Failed parsing error message");
+		result = __FAILURE__;
+	}
+	else
+	{
+		JSON_Object* json_root_object = json_value_get_object(json_value);
+		
+		if (json_root_object == NULL)
+		{
+			LogError("Failed parsing error message");
+			result = __FAILURE__;
+		}
+		else
+		{
+			result = (int)json_object_get_number(json_root_object, "errorCode");
+		}
+		
+		json_value_free(json_value);
+	}
+	
+	return result;
+}
+
 static void on_http_reply_recv(void* callback_ctx, HTTP_CALLBACK_REASON request_result, const unsigned char* content, size_t content_len, unsigned int status_code, HTTP_HEADERS_HANDLE responseHeadersHandle)
 {
     (void)responseHeadersHandle;
@@ -176,13 +211,23 @@ static void on_http_reply_recv(void* callback_ctx, HTTP_CALLBACK_REASON request_
         }
         else if (status_code > PROV_STATUS_CODE_TRANSIENT_ERROR)
         {
+            LogError("!!!! GOING TO TRANSPORT_CLIENT_STATE_TRANSIENT (%d) !!!!", status_code);
             // On transient error reset the transport to send state
             http_info->transport_state = TRANSPORT_CLIENT_STATE_TRANSIENT;
         }
         else
         {
-            LogError("Failure status code sent from the server: %u", status_code);
-            http_info->transport_state = TRANSPORT_CLIENT_STATE_ERROR;
+			int error_code = parseErrorCode(content, content_len);
+			
+            if (error_code == DPS_ERROR_CODE_THROTTLED)
+			{
+                http_info->transport_state = TRANSPORT_CLIENT_STATE_THROTTLED;
+			}
+            //else // TODO (ewertons): uncomment
+            {
+                LogError("Failure status code sent from the server: %u", status_code);
+                http_info->transport_state = TRANSPORT_CLIENT_STATE_ERROR;
+            }
         }
     }
     else
@@ -862,6 +907,7 @@ int prov_transport_http_get_operation_status(PROV_DEVICE_TRANSPORT_HANDLE handle
         }
         else
         {
+            LogError("!!!! SENDING GET THROUGH UHTTP !!!!");
             /* Codes_PROV_TRANSPORT_HTTP_CLIENT_07_032: [ prov_transport_http_get_operation_status shall send the request using the http client. ] */
             if (uhttp_client_execute_request(http_info->http_client, HTTP_CLIENT_REQUEST_GET, uri_path, http_headers, NULL, 0, on_http_reply_recv, http_info) != HTTP_CLIENT_OK)
             {
